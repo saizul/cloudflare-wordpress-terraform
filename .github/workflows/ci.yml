@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - modules/wordpress-zone
+          - examples/basic
+          - examples/woocommerce
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+      - name: Format check
+        run: terraform fmt -check -recursive
+      - name: Init
+        working-directory: ${{ matrix.dir }}
+        run: terraform init -backend=false -input=false
+      - name: Validate
+        working-directory: ${{ matrix.dir }}
+        run: terraform validate
+
+  tflint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-linters/setup-tflint@v4
+      - name: Init tflint
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Lint
+        run: |
+          for d in modules/wordpress-zone examples/basic examples/woocommerce; do
+            echo "== $d"
+            tflint --chdir="$d" --config="$GITHUB_WORKSPACE/.tflint.hcl"
+          done
