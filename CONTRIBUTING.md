@@ -16,8 +16,11 @@ terraform fmt -recursive
 for d in modules/wordpress-zone examples/basic examples/woocommerce; do
   (cd "$d" && terraform init -backend=false && terraform validate)
 done
+(cd modules/wordpress-zone && terraform test)
 tflint --init && tflint --chdir=modules/wordpress-zone --config="$PWD/.tflint.hcl"
 ```
+
+`terraform test` (Terraform 1.7 or later) runs the plan-only suites in `modules/wordpress-zone/tests` against a mock provider; no API token is needed. New inputs and rules should come with a test there, and new validation blocks with an `expect_failures` case in `validation.tftest.hcl`.
 
 All of these run in CI and must pass.
 

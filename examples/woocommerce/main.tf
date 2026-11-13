@@ -95,6 +95,14 @@ module "woocommerce_zone" {
 
   # Bot Fight Mode cannot be skipped for webhooks, so keep it off for stores.
   bot_fight_mode = false
+
+  # Security response headers (HSTS, nosniff, frame and referrer policy).
+  # Check that every page still renders, including payment iframes, before enabling in production.
+  enable_security_headers = true
+}
+
+output "security_headers_ruleset_id" {
+  value = module.woocommerce_zone.security_headers_ruleset_id
 }
 
 output "cache_bypass_expression" {
