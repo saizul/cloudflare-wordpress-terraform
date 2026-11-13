@@ -37,3 +37,8 @@ output "cache_bypass_expression" {
   description = "The rendered cache-bypass expression, useful for reviewing before apply."
   value       = local.cache_bypass_expression
 }
+
+output "security_headers_ruleset_id" {
+  description = "ID of the security response headers ruleset, or null when disabled."
+  value       = try(cloudflare_ruleset.security_headers[0].id, null)
+}

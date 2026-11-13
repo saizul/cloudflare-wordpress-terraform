@@ -214,6 +214,11 @@ variable "cache_bypass_paths" {
     condition     = alltrue([for p in var.cache_bypass_paths : startswith(p, "/")])
     error_message = "Every entry in cache_bypass_paths must start with \"/\"."
   }
+
+  validation {
+    condition     = alltrue([for p in var.cache_bypass_paths : !can(regex("[\"\\\\\\s]", p)) && p != "/?"])
+    error_message = "cache_bypass_paths entries must not contain double quotes, backslashes or whitespace, and \"/?\" needs a query fragment after it (for example \"/?wc-ajax\")."
+  }
 }
 
 variable "cache_bypass_cookies" {
@@ -232,6 +237,11 @@ variable "cache_bypass_cookies" {
   validation {
     condition     = length(var.cache_bypass_cookies) > 0
     error_message = "cache_bypass_cookies must contain at least one cookie fragment, otherwise logged-in users may receive cached pages."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.cache_bypass_cookies : length(c) > 0 && !can(regex("[\"\\\\;=\\s]", c))])
+    error_message = "cache_bypass_cookies entries must be non-empty and must not contain double quotes, backslashes, semicolons, equals signs or whitespace."
   }
 }
 
@@ -326,10 +336,66 @@ variable "api_paths" {
     condition     = alltrue([for p in var.api_paths : startswith(p, "/")])
     error_message = "Every entry in api_paths must start with \"/\"."
   }
+
+  validation {
+    condition     = alltrue([for p in var.api_paths : !can(regex("[\"\\\\\\s]", p))])
+    error_message = "api_paths entries must not contain double quotes, backslashes or whitespace."
+  }
 }
 
 variable "bot_fight_mode" {
   description = "Set true/false to manage the zone's Bot Fight Mode through this module; null (default) leaves it untouched. Bot Fight Mode cannot be skipped by custom rules, so turn it off if it blocks payment webhooks or API clients."
   type        = bool
   default     = null
+}
+
+# ---------------------------------------------------------------------------
+# Security response headers
+# ---------------------------------------------------------------------------
+
+variable "enable_security_headers" {
+  description = "Create a response header transform ruleset that sets the headers in security_headers on every matching response. Off by default because it changes what browsers receive. Note: this manages the whole http_response_headers_transform entrypoint ruleset of the zone."
+  type        = bool
+  default     = false
+}
+
+variable "security_headers" {
+  description = "Response headers to set (header name => value) when enable_security_headers is true. Values replace any header of the same name sent by the origin. The default HSTS value has no includeSubDomains or preload; extend it only when every subdomain serves HTTPS."
+  type        = map(string)
+  default = {
+    "Strict-Transport-Security" = "max-age=31536000"
+    "X-Content-Type-Options"    = "nosniff"
+    "X-Frame-Options"           = "SAMEORIGIN"
+    "Referrer-Policy"           = "strict-origin-when-cross-origin"
+    "Permissions-Policy"        = "camera=(), microphone=(), geolocation=()"
+  }
+
+  validation {
+    condition     = alltrue([for name in keys(var.security_headers) : can(regex("^[A-Za-z0-9][A-Za-z0-9-]*$", name))])
+    error_message = "security_headers names must contain only letters, digits and hyphens, and must not start with a hyphen."
+  }
+
+  validation {
+    condition     = alltrue([for value in values(var.security_headers) : length(trimspace(value)) > 0])
+    error_message = "security_headers values must not be empty."
+  }
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.security_headers) :
+      !contains(["set-cookie", "content-length", "content-type", "transfer-encoding", "connection", "host", "location"], lower(name))
+    ])
+    error_message = "security_headers must not set hop-by-hop or content headers (Set-Cookie, Content-Length, Content-Type, Transfer-Encoding, Connection, Host, Location)."
+  }
+}
+
+variable "security_headers_expression" {
+  description = "Rule expression selecting the responses that receive security_headers. The default \"true\" matches every response of the zone."
+  type        = string
+  default     = "true"
+
+  validation {
+    condition     = length(trimspace(var.security_headers_expression)) > 0
+    error_message = "security_headers_expression must not be empty; use \"true\" to match every response."
+  }
 }

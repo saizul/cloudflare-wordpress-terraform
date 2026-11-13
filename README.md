@@ -16,6 +16,7 @@ Maintained by [Saizul Amin](https://saizul.com).
 | Cache | `cloudflare_ruleset` (`http_request_cache_settings`) | bypass dynamic traffic, cache static assets |
 | WAF | `cloudflare_ruleset` (`http_request_firewall_custom`) | block xmlrpc, challenge bad bots, skip checks on API paths |
 | Rate limiting | `cloudflare_ruleset` (`http_ratelimit`) | throttle `POST /wp-login.php` |
+| Security headers | `cloudflare_ruleset` (`http_response_headers_transform`) | off; opt in with `enable_security_headers` |
 | Bot Fight Mode | `cloudflare_bot_management` | untouched unless `bot_fight_mode` is set |
 
 The module does **not** create the zone, change nameservers, or manage Page Shield policies.
@@ -48,7 +49,7 @@ module "wordpress_zone" {
 }
 ```
 
-Create an API token scoped to the single zone with the permissions your configuration needs: Zone Settings Edit, DNS Edit, Zone WAF Edit, Cache Rules Edit (cache rules) and, only if you set `bot_fight_mode`, Bot Management Edit. Check the exact permission names in the Cloudflare dashboard when creating the token.
+Create an API token scoped to the single zone with the permissions your configuration needs: Zone Settings Edit, DNS Edit, Zone WAF Edit, Cache Rules Edit (cache rules), Transform Rules Edit (only if you enable security headers) and, only if you set `bot_fight_mode`, Bot Management Edit. Check the exact permission names in the Cloudflare dashboard when creating the token.
 
 See [`examples/basic`](examples/basic) and [`examples/woocommerce`](examples/woocommerce).
 
@@ -76,6 +77,29 @@ The module owns the zone's whole `http_request_cache_settings` entrypoint rulese
 ### Rate limiting (`http_ratelimit`)
 
 **`wp_rate_limit_login`**: blocks a client IP (per Cloudflare data centre) that sends more than `login_rate_limit_requests` `POST /wp-login.php` requests within `login_rate_limit_period` seconds, for `login_rate_limit_timeout` seconds. Defaults (5 requests / 10 s / 10 s) fit the Free plan. Longer periods and timeouts need a paid plan; check the current [Cloudflare rate limiting limits](https://developers.cloudflare.com/waf/rate-limiting-rules/) for your plan, because applying an unsupported value fails at the API.
+
+### Security headers (`http_response_headers_transform`)
+
+Off by default. With `enable_security_headers = true` the module adds **`wp_security_headers`**, a `rewrite` rule that sets every header in `security_headers` on responses matching `security_headers_expression` (default `true`, all responses). The `set` operation replaces any value sent by WordPress or a plugin, so remove a header from the map if a plugin should own it.
+
+| Header | Default value |
+| --- | --- |
+| `Strict-Transport-Security` | `max-age=31536000` |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+
+Passing your own map replaces the defaults entirely. HSTS is deliberately sent without `includeSubDomains` or `preload`: browsers remember it for the whole `max-age`, so add those only when every subdomain serves valid HTTPS. `X-Frame-Options: SAMEORIGIN` blocks other sites from framing your pages; payment gateways that frame *their* page inside yours are unaffected, but check embeds of your site elsewhere. Header names are validated (letters, digits, hyphens) and headers such as `Set-Cookie`, `Content-Type` or `Location` are refused.
+
+To leave the admin area alone, for example:
+
+```hcl
+enable_security_headers     = true
+security_headers_expression = "not starts_with(http.request.uri.path, \"/wp-admin\")"
+```
+
+Like the other rulesets, this one owns the zone's whole `http_response_headers_transform` entrypoint ruleset; import an existing one before enabling.
 
 ### Zone settings
 
@@ -133,18 +157,38 @@ Moving DNS to Cloudflare is the riskiest moment for email. Work through this bef
 | `skip_checks_on_api_paths` | `bool` | `true` | Skip BIC/UA/security level on API paths |
 | `api_paths` | `list(string)` | `["/wp-json/", "/wc-api/"]` | API path prefixes |
 | `bot_fight_mode` | `bool` | `null` | `null` leaves it unmanaged |
+| `enable_security_headers` | `bool` | `false` | Manage the response header transform ruleset |
+| `security_headers` | `map(string)` | see [Security headers](#security-headers-http_response_headers_transform) | Header name to value |
+| `security_headers_expression` | `string` | `"true"` | Responses that receive the headers |
 
 ## Outputs
 
-`dns_record_ids`, `proxied_dns_records`, `dns_only_dns_records`, `zone_settings_applied`, `cache_ruleset_id`, `waf_custom_ruleset_id`, `login_rate_limit_ruleset_id`, `cache_bypass_expression`.
+`dns_record_ids`, `proxied_dns_records`, `dns_only_dns_records`, `zone_settings_applied`, `cache_ruleset_id`, `waf_custom_ruleset_id`, `login_rate_limit_ruleset_id`, `security_headers_ruleset_id`, `cache_bypass_expression`.
 
 ## Upgrading from provider v4
 
 v5 renamed resources: `cloudflare_record` became `cloudflare_dns_record` (`value` is now `content`, `ttl` is required), `cloudflare_zone_settings_override` became one `cloudflare_zone_setting` per setting, and `cloudflare_ruleset` rules are now an attribute list instead of repeated `rules` blocks. This module targets v5 only.
 
-## Validation and CI
+## Validation, tests and CI
 
-CI runs `terraform fmt -check -recursive`, `terraform init -backend=false` and `terraform validate` for the module and both examples, and `tflint` with the recommended Terraform ruleset. Note that `validate` checks syntax and provider schema, not whether your Cloudflare plan supports a given rule; always review `terraform plan`.
+Entries of `cache_bypass_paths`, `cache_bypass_cookies`, `api_paths` and `bad_bot_user_agents` are interpolated into rule expressions, so values containing double quotes or backslashes (and whitespace, for paths and cookies) are rejected rather than producing a broken or wider-than-intended expression.
+
+The module ships native `terraform test` suites in [`modules/wordpress-zone/tests`](modules/wordpress-zone/tests). They use `mock_provider "cloudflare"` with `command = plan`, so they need no API token and create nothing:
+
+- `defaults.tftest.hcl`: resources and rule order planned with default inputs.
+- `toggles.tftest.hcl`: each feature flag adds or removes the expected rulesets, rules and settings; DNS proxy handling.
+- `security_headers.tftest.hcl`: the optional header transform ruleset.
+- `validation.tftest.hcl`: invalid inputs are rejected (`expect_failures`).
+
+```sh
+cd modules/wordpress-zone
+terraform init -backend=false
+terraform test
+```
+
+`terraform test` with mock providers needs Terraform 1.7 or later; the module itself still supports 1.6.
+
+CI runs `terraform fmt -check -recursive`, `terraform init -backend=false` and `terraform validate` for the module and both examples, `terraform test` for the module, and `tflint` with the recommended Terraform ruleset. Note that `validate` and the tests check syntax, provider schema and module logic, not whether your Cloudflare plan supports a given rule; always review `terraform plan`.
 
 ## Importing existing resources
 

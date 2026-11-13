@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Optional security response headers via a `cloudflare_ruleset` in the `http_response_headers_transform` phase (`enable_security_headers`, `security_headers`, `security_headers_expression`), off by default, and the `security_headers_ruleset_id` output.
+- Native `terraform test` suites under `modules/wordpress-zone/tests` using a mock Cloudflare provider: defaults, feature toggles, security headers and input validation.
+- CI job running `terraform test` for the module.
+
+### Changed
+- `cache_bypass_paths`, `cache_bypass_cookies` and `api_paths` now reject double quotes, backslashes and whitespace (and cookies also `;` and `=`), which would otherwise break or widen the generated rule expressions. A bare `"/?"` bypass entry is rejected.
+- `examples/woocommerce` enables the security headers.
+
 ## [1.0.0] - 2026-11-10
 
 ### Added

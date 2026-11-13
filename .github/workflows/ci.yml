@@ -32,6 +32,20 @@ jobs:
         working-directory: ${{ matrix.dir }}
         run: terraform validate
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+      - name: Init
+        working-directory: modules/wordpress-zone
+        run: terraform init -backend=false -input=false
+      - name: Test
+        working-directory: modules/wordpress-zone
+        run: terraform test
+
   tflint:
     runs-on: ubuntu-latest
     steps:
